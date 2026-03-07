@@ -105,10 +105,10 @@ class VariableClassesHandler:
         return self.class_distribution.distribution_of[variable]
 
 def writeDictToPath(path : str,dictIn :Dict):
-    if path and dictIn:
+    if path != None and dictIn != None:
         names = {a.name:b.name for a,b in dictIn.items()}
         with open(path,mode="w") as f: #Note: this trncates the file, so the path has to be up to date, else the old data is lost!
-            f.write(str(json.dumps(names)))
+            json.dump(names, f)
     else:
         raise Exception(f"Got incorrect parameters: Path = {path}, dict = {dictIn}")
 
