@@ -327,8 +327,6 @@ class Boissinot2008:
         else:
             self.nvars = []
 
-        
-
     class BoissinotVariableRenamer(VariableRenamer):
         def __init__(self, task: DecompilerTask, interference_graph,varClassesn:list,varClassesg:list, calcRNM :bool = True):
             super().__init__(task,interference_graph)

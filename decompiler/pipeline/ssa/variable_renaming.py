@@ -36,7 +36,8 @@ from networkx import (
     subgraph,
 )
 from scipy.optimize import Bounds, LinearConstraint, milp
-
+import os
+import json
 
 @dataclass
 class LabelCounter:
@@ -103,6 +104,14 @@ class VariableClassesHandler:
         """
         return self.class_distribution.distribution_of[variable]
 
+def writeDictToPath(path : str,dictIn :Dict):
+    if path and dictIn:
+        names = {a.name:b.name for a,b in dictIn.items()}
+        with open(path,mode="w") as f: #Note: this trncates the file, so the path has to be up to date, else the old data is lost!
+            f.write(str(json.dumps(names)))
+    else:
+        raise Exception(f"Got incorrect parameters: Path = {path}, dict = {dictIn}")
+
 
 class VariableRenamer:
     """Base class for variable renaming"""
@@ -134,6 +143,10 @@ class VariableRenamer:
         """
         This function replaces in each instruction a variable by the variable in replacement_for_variable[variable].
         """
+        env = os.getenv("SSA_DICT_OUT")
+        if env:
+            writeDictToPath(str(env),self.renaming_map)
+
         for instruction in self.cfg.instructions:
             for variable in instruction.requirements + instruction.definitions:
                 self._replace_variable_in_instruction(variable, instruction)
