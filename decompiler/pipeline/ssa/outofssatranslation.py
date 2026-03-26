@@ -122,7 +122,7 @@ class OutOfSsaTranslation(PipelineStage):
                         f"Phi function type mismatch: variable {k.name} has type {k.type}, "
                         f"but variable {r.name} has type {r.type}"
                     )
-        trategy(self)
+        strategy(self)
 
     def _simple_out_of_ssa(self) -> None:
         """
