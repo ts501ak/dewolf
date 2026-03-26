@@ -694,7 +694,8 @@ class ConditionalVariableRenamer(VariableRenamer):
                             else:
                                 raise Exception("Something went wrong while solving the LP")
                 failCount = 0
-                for pair in self.getInterferingPairs(dependency_graph):
+                ifPairs = self.getInterferingPairs(dependency_graph)
+                for pair in ifPairs:
                     if has_path(dependency_graph, pair[0], pair[1]):
                         self.correctedInterferencePairs += 1
                         _, (part1, part2) = minimum_cut(dependency_graph, pair[0], pair[1], capacity="score")
@@ -702,6 +703,9 @@ class ConditionalVariableRenamer(VariableRenamer):
                         edges = [(u, v) for u in part1 for v in dependency_graph.neighbors(u) if v in part2]
                         dependency_graph.remove_edges_from(edges)
                 #print("FailCount:",failCount)
+                path = os.environ["HEINZ_PETER"]
+                with open(path) as f:
+                    f.write(f"{failCount};{len(ifPairs)};\n")
                 return dependency_graph
 
             case _:
