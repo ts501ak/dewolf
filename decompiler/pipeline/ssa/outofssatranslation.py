@@ -109,7 +109,20 @@ class OutOfSsaTranslation(PipelineStage):
                 f"The Out of SSA according to the optimization level {self._optimization.value} is not implemented so far."
             )
 
-        strategy(self)
+        for phi in self.task.cfg.instructions:
+            if not isinstance(phi, Phi): 
+                continue
+            res = [ phi.destination ] + list(phi.value)
+            if not res: 
+                continue
+            k = res[0]
+            for r in res[1:]:
+                if r.type != k.type:
+                    raise TypeError(
+                        f"Phi function type mismatch: variable {k.name} has type {k.type}, "
+                        f"but variable {r.name} has type {r.type}"
+                    )
+        trategy(self)
 
     def _simple_out_of_ssa(self) -> None:
         """
