@@ -343,6 +343,21 @@ class Boissinot2008:
                 self._generate_renaming_map()
 
         def _generate_renaming_map(self):
+            
+            drop = []
+            for i in range(len(self.varClasses)):
+                aktClass = self.varClasses[i]
+                types = set([x.type for x in aktClass])
+                if len(types) <= 1:
+                    pass
+                else:
+                    drop.append(i)
+                    for t in types:
+                        self.varClasses.append([x for x in aktClass if x.type == t])
+            drop = sorted(drop,reverse=True)
+            for d in drop:
+                self.varClasses.pop(d)
+
             count = 0
             assignedNames = []
 
@@ -361,7 +376,7 @@ class Boissinot2008:
                             count += 1
                         assignedNames.append(new_name)
                         for vv in varClass:
-                            self.renaming_map[vv] = Variable(new_name,vv.type,None,vv.is_aliased,vv,vv.tags)
+                            self.renaming_map[vv] = Variable(new_name,vv.type,None,False,vv,vv.tags)
                     else: #only ordinary variables
                         new_name = varClass[0].name
                         i = 1
@@ -376,7 +391,7 @@ class Boissinot2008:
                             count += 1
                         assignedNames.append(new_name)
                         for vv in varClass:
-                            self.renaming_map[vv] = Variable(new_name,vv.type,None,vv.is_aliased,vv,vv.tags)
+                            self.renaming_map[vv] = Variable(new_name,vv.type,None,False,vv,vv.tags)
 
 
                 elif len(areGlobs) == len(varClass): #only globals
@@ -387,7 +402,7 @@ class Boissinot2008:
                         count += 1
                     assignedNames.append(new_name)
                     for vv in varClass:
-                        self.renaming_map[vv] = GlobalVariable(new_name,vv.type,vv.initial_value,None,vv.is_aliased,vv,vv.is_constant,vv.tags)
+                        self.renaming_map[vv] = GlobalVariable(new_name,vv.type,vv.initial_value,None,False,vv,vv.is_constant,vv.tags)
                 else: #mixed PCK with globals and non-globals - Shouldn't occur!!
                     raise Exception("Found a class containing globals and ordinary variables")
                 
