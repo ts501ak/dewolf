@@ -704,7 +704,7 @@ class ConditionalVariableRenamer(VariableRenamer):
                         dependency_graph.remove_edges_from(edges)
                 #print("FailCount:",failCount)
                 path = os.environ["HEINZ_PETER"]
-                with open(path,mode="w") as f:
+                with open(path,mode="a+") as f:
                     f.write(f"{failCount};{len(ifPairs)};\n")
                 return dependency_graph
 
