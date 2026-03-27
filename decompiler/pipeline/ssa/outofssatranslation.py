@@ -112,7 +112,7 @@ class OutOfSsaTranslation(PipelineStage):
         for phi in self.task.cfg.instructions:
             if not isinstance(phi, Phi): 
                 continue
-            res = [ phi.destination ] + list(phi.value)
+            res = [ phi.destination ] + list(phi.requirements)
             if not res: 
                 continue
             k = res[0]
