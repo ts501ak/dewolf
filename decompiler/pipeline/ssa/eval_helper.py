@@ -159,12 +159,16 @@ class EvalHelper:
 
     def _collect_metrics(self) -> None:
         """Sammelt alle Metriken aus dem CFG"""
-        self._count_variables()
-        self._count_definitions_and_usages()
-        self._count_copy_assignments()
-        self._calculate_halstead_metrics()
-        self._calculate_live_ranges()
-        self._calculate_scopes()
+        try:
+            import traceback
+            self._count_variables()
+            self._count_definitions_and_usages()
+            self._count_copy_assignments()
+            self._calculate_halstead_metrics()
+            self._calculate_live_ranges()
+            self._calculate_scopes()
+        except Exception as ex:
+            traceback.print_exception(ex)
 
     def _count_variables(self) -> None:
         """Zählt die Anzahl der eindeutigen Variablen (nach name, ohne ssa_label)"""
