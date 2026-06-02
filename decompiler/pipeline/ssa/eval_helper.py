@@ -49,8 +49,7 @@ class LivenessDataflowAnalysis:
 
             for instruction in block.instructions:
                 # 1. Process Usages FIRST (for instructions like x = x + 1)
-                uses = _get_variables_from_expr(instruction.value)
-                for var in uses:
+                for var in instruction.requirements:
                     if var.name not in block_def:
                         block_use.add(var.name)
 
@@ -311,11 +310,10 @@ class EvalHelper:
                             # Variable wurde definiert, aber danach NIE genutzt (Dead Code)
                             self.variables[var.name]["live_ranges"].append(0)
 
-                    # Prüfe Nutzungen (Hier beginnt die Live-Range beim Rückwärtsgehen)
-                    uses = _get_variables_from_expr(instr.value)
-                    for var in uses:
-                        if var.name not in last_seen_use_index:
-                            last_seen_use_index[var.name] = idx
+                # Prüfe Nutzungen (Hier beginnt die Live-Range beim Rückwärtsgehen)
+                for var in  instr.requirements:
+                    if var.name not in last_seen_use_index:
+                        last_seen_use_index[var.name] = idx
                         currently_live.add(var.name)
 
     def _calculate_scopes(self) -> None:
