@@ -107,6 +107,10 @@ class EvalHelper:
         self.cfg = cfg
         self.num_variables: int = 0
         self.num_copy_assignments: int = 0
+        self.total_operands: int = 0
+        self.distinct_operands: int = 0
+        self.total_operators: int = 0
+        self.distinct_operators: int = 0
         self.variables: Dict[str, Dict] = defaultdict(lambda: {
             "definitions": 0,
             "usages": 0,
@@ -300,6 +304,11 @@ class EvalHelper:
         n2 = len(variables) + len(constants)
         N1 = total_operators
         N2 = total_operands
+
+        self.total_operands = N2 
+        self.total_operators = N1
+        self.distinct_operands = n2
+        self.distinct_operators = n1
         
         # Vocabulary = n1 + n2
         vocabulary = n1 + n2
@@ -344,6 +353,10 @@ class EvalHelper:
             "num_variables": self.num_variables,
             "num_copy_assignments": self.num_copy_assignments,
             # Halstead Metriken
+            "total_operators": self.total_operators,
+            "distinct_operators": self.distinct_operators,
+            "total_operands": self.total_operands,
+            "distinct_operands": self.distinct_operands,
             "halstead_vocabulary": self.halstead_vocabulary,
             "halstead_length": self.halstead_length,
             "halstead_volume": self.halstead_volume,
