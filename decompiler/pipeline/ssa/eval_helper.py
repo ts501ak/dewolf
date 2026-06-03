@@ -5,7 +5,7 @@ from typing import Dict, Set
 
 from decompiler.structures.graphs.cfg import BasicBlock, ControlFlowGraph
 from decompiler.structures.pseudo.expressions import Constant, Variable
-from decompiler.structures.pseudo.instructions import Assignment
+from decompiler.structures.pseudo.instructions import Assignment, Branch, Return, Break, Continue
 from decompiler.structures.pseudo.operations import BinaryOperation, Call, TernaryExpression, UnaryOperation
 
 from collections import defaultdict
@@ -251,6 +251,19 @@ class EvalHelper:
 
         for block in self.cfg:
             for instruction in block: 
+                if isinstance(instruction, (Branch, Return, Break, Continue)):
+                    if isinstance(instruction, Branch):
+                        total_operators += 1
+                        distinct_operators.add("If")
+                    elif isinstance(instruction, Return):
+                        total_operators += 1
+                        distinct_operators.add("Return")
+                    elif isinstance(instruction, Break):
+                        total_operators += 1
+                        distinct_operators.add("Break")
+                    elif isinstance(instruction, Continue):
+                        total_operators += 1
+                        distinct_operators.add("Continue")
                 for expr in instruction.subexpressions():
                     if isinstance(expr, Variable):
                         total_operands += 1
