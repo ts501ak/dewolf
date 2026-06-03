@@ -144,7 +144,6 @@ class EvalHelper:
             if isinstance(subexpr, (BinaryOperation, UnaryOperation, Call)):
                 self.distinct_operators.add(subexpr.operation)
                 self.total_operators += 1
-        print(self.distinct_operands)
 
     def _extract_operands(self, expr) -> None:
         """Extrahiert alle Operanden (Variablen und Konstanten) für Halstead-Metriken"""
