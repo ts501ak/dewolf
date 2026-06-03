@@ -31,5 +31,3 @@ class SSAEvalExport(PipelineStage):
                 DecoratedCFG.from_cfg(task.graph).export_plot(png_path, "png")
         except:
             traceback.print_exc()
-            
-        sys.exit(0)
