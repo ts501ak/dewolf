@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import traceback
 
 from decompiler.pipeline.ssa.eval_helper import EvalHelper
 from decompiler.pipeline.stage import PipelineStage
@@ -16,16 +17,19 @@ class SSAEvalExport(PipelineStage):
 
     def run(self, task: DecompilerTask) -> None:
         """Export SSA evaluation metrics to JSON file specified by HEINZ_PETER env var."""
-        eval_helper = EvalHelper(task.graph)
-        metrics_dict = eval_helper.to_dict()
-        
-        output_path = os.environ.get("HEINZ_PETER")
-        if output_path:
-            with open(output_path, "w") as f:
-                json.dump(metrics_dict, f, indent=2, default=str)
+        try:
+            eval_helper = EvalHelper(task.graph)
+            metrics_dict = eval_helper.to_dict()
+            
+            output_path = os.environ.get("HEINZ_PETER")
+            if output_path:
+                with open(output_path, "w") as f:
+                    json.dump(metrics_dict, f, indent=2, default=str)
 
-        #png_path = os.environ.get("HEINZ_P_DOG")
-        #if png_path:
-        #    DecoratedCFG.from_cfg(task.graph).export_plot(png_path, "png")
-        
+            png_path = os.environ.get("HEINZ_P_DOG")
+            if png_path:
+                DecoratedCFG.from_cfg(task.graph).export_plot(png_path, "png")
+        except:
+            traceback.print_exc()
+            
         sys.exit(0)

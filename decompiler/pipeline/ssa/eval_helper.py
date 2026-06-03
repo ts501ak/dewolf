@@ -1,6 +1,5 @@
 import json
 import math
-import traceback
 from collections import defaultdict
 from typing import Dict, Set
 
@@ -116,10 +115,7 @@ class EvalHelper:
             "live_ranges": [],
         })
 
-        try:
-            self._collect_metrics()
-        except:
-            traceback.print_exc()
+        self._collect_metrics()
 
     def _calculate_live_ranges(self) -> None:
         """
