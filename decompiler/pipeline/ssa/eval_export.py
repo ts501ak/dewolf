@@ -5,9 +5,10 @@ import sys
 from decompiler.pipeline.ssa.eval_helper import EvalHelper
 from decompiler.pipeline.stage import PipelineStage
 from decompiler.task import DecompilerTask
+from decompiler.util.decoration import DecoratedCFG 
 
 
-class SsaEvalExport(PipelineStage):
+class SSAEvalExport(PipelineStage):
     """Pipeline stage that exports SSA evaluation metrics to a JSON file."""
 
     name = "ssa-eval-export"
@@ -22,7 +23,9 @@ class SsaEvalExport(PipelineStage):
         if output_path:
             with open(output_path, "w") as f:
                 json.dump(metrics_dict, f, indent=2, default=str)
-        else:
-            self.logger.warning("HEINZ_PETER environment variable not set, skipping export")
+
+        #png_path = os.environ.get("HEINZ_P_DOG")
+        #if png_path:
+        #    DecoratedCFG.from_cfg(task.graph).export_plot(png_path, "png")
         
         sys.exit(0)

@@ -1,22 +1,16 @@
 import json
+import math
+import traceback
 from collections import defaultdict
-from typing import Dict, List, Set
+from typing import Dict, Set
 
 from decompiler.structures.graphs.cfg import BasicBlock, ControlFlowGraph
 from decompiler.structures.pseudo.expressions import Constant, Variable
 from decompiler.structures.pseudo.instructions import Assignment
-from decompiler.structures.pseudo.operations import BinaryOperation, Call, UnaryOperation
+from decompiler.structures.pseudo.operations import BinaryOperation, Call, TernaryExpression, UnaryOperation
 
 from collections import defaultdict
 from typing import Dict, Set
-
-def _get_variables_from_expr(expr) -> List[Variable]:
-    """Extrahiert alle Variablen aus einem Ausdruck"""
-    variables = []
-    for subexpr in expr.subexpressions():
-        if isinstance(subexpr, Variable):
-            variables.append(subexpr)
-    return variables
 
 class LivenessDataflowAnalysis:
     """
@@ -72,7 +66,7 @@ class LivenessDataflowAnalysis:
             
             # For dataflow, iterating backwards usually converges faster, 
             # but standard iteration works fine until it hits a fixed point.
-            for block in self.cfg:
+            for block in self.cfg.iter_postorder():
                 # OUT[B] = Union of IN[S] for all successors S of B
                 new_out = set()
                 for succ_block in self.cfg.get_successors(block):
@@ -113,122 +107,190 @@ class EvalHelper:
     def __init__(self, cfg: ControlFlowGraph) -> None:
         self.cfg = cfg
         self.num_variables: int = 0
-        self.num_definitions: int = 0
-        self.num_usages: int = 0
         self.num_copy_assignments: int = 0
-        self.distinct_operators: Set = set()
-        self.distinct_operands: Set = set()
-        self.total_operators: int = 0
-        self.total_operands: int = 0
         self.variables: Dict[str, Dict] = defaultdict(lambda: {
             "definitions": 0,
             "usages": 0,
+            "scopes": 0,
+            "max_live_distance": 0,
             "live_ranges": [],
-            "scopes": set(),
         })
 
-        self._collect_metrics()
+        try:
+            self._collect_metrics()
+        except:
+            traceback.print_exc()
 
-    def _get_all_variables(self) -> Set[Variable]:
-        """Gibt alle Variablen im CFG zurück"""
-        variables = set()
-        for instruction in self.cfg.instructions:
-            for expr in instruction.subexpressions():
-                if isinstance(expr, Variable):
-                    variables.add(expr)
-        return variables
+    def _calculate_live_ranges(self) -> None:
+        """
+        Calculates disjoint [start, end] live intervals per variable using Dataflow Analysis.
+        """
+        # 1. Run Dataflow Analysis
+        dataflow = LivenessDataflowAnalysis(self.cfg)
+        
+        # 2. Linearize the CFG and map instructions to gap-numbers
+        # We use iter_preorder() based on your screenshot to get a flat list of blocks
+        
+        global_instr_idx = 1
+        instr_mapping = {}
+        block_ranges = {} 
+        
+        ordered_blocks = list(self.cfg.iter_preorder())
 
-    def _extract_operators(self, expr) -> None:
-        """Extrahiert alle Operatoren aus einem Ausdruck für Halstead-Metriken"""
-        for subexpr in expr.subexpressions():
-            if isinstance(subexpr, (BinaryOperation, UnaryOperation, Call)):
-                self.distinct_operators.add(subexpr.operation)
-                self.total_operators += 1
+        for block in ordered_blocks: 
+            if not block.instructions:
+                continue
+                
+            start_idx = global_instr_idx
+            for instr in block.instructions:
+                instr_mapping[instr] = global_instr_idx
+                global_instr_idx += 1
+                
+            # The boundary where this block ends and the next potential block begins.
+            # This ensures intervals that span across blocks will mathematically touch.
+            end_idx = global_instr_idx 
+            block_ranges[block] = (start_idx, end_idx)
 
-    def _extract_operands(self, expr) -> None:
-        """Extrahiert alle Operanden (Variablen und Konstanten) für Halstead-Metriken"""
-        for subexpr in expr.subexpressions():
-            if isinstance(subexpr, Variable):
-                self.distinct_operands.add(subexpr.name)
-                self.total_operands += 1
-            elif isinstance(subexpr, Constant):
-                # Track constants by (value, type) to distinguish e.g. int 1 vs float 1.0
-                operand_key = (subexpr.value, str(subexpr.type))
-                self.distinct_operands.add(operand_key)
-                self.total_operands += 1
+        # 3. Backward Analysis to build [start, end] intervals
+        for block in ordered_blocks:
+            if not block.instructions:
+                continue
+                
+            block_start, block_end = block_ranges[block]
+            
+            # Variables that survive past this block (LiveOut)
+            currently_live = set(dataflow.live_out[block])
+            interval_ends = {}
+            
+            # If a variable is LiveOut, its current interval extends to the block's exit boundary
+            for var_name in currently_live:
+                interval_ends[var_name] = block_end
+
+            # Traverse backwards through the block
+            for instr in reversed(block.instructions):
+                idx = instr_mapping[instr]
+                
+                # DEFs: Variable dies going backwards (This marks the START of a Live Range)
+                if isinstance(instr, Assignment):
+                    for var in instr.definitions:
+                        if var.name in interval_ends:
+                            # Close the interval [definition_idx, last_use_idx]
+                            start = idx
+                            end = interval_ends[var.name]
+                            self.variables[var.name].setdefault("live_ranges", []).append([start, end])
+                            
+                            # Remove from tracking since it's dead above this point
+                            del interval_ends[var.name]
+                            currently_live.discard(var.name)
+                        else:
+                            # Dead code: Defined but never used locally or globally.
+                            # The range is just the instruction itself.
+                            self.variables[var.name].setdefault("live_ranges", []).append([idx, idx])
+
+                # USEs: Variable becomes live going backwards (This marks the END of a new Live Range)
+                for var in instr.requirements:
+                    if var.name not in interval_ends:
+                        interval_ends[var.name] = idx
+                        currently_live.add(var.name)
+
+            # Any variables STILL tracked at the top of the block are LiveIn.
+            # Their interval spans from the start of the block to their first use inside it.
+            for var_name, end_idx in interval_ends.items():
+                self.variables[var_name].setdefault("live_ranges", []).append([block_start, end_idx])
+
+        # 4. Clean up and merge adjacent/overlapping intervals across block boundaries
+        self._merge_all_live_ranges()
+
+    def _merge_all_live_ranges(self) -> None:
+        """
+        Helper method to merge touching intervals created by block boundaries,
+        calculate the distance for each merged interval, and find the max distance.
+        """
+        for var_name, data in self.variables.items():
+            # Extract the raw [start, end] pairs generated by the backward pass
+            raw_ranges = data.get("live_ranges", [])
+            if not raw_ranges:
+                continue
+                
+            # 1. Sort intervals by their start time
+            sorted_ranges = sorted(raw_ranges, key=lambda r: r[0])
+            merged = [sorted_ranges[0]]
+            
+            # 2. Merge touching or overlapping intervals
+            for current_start, current_end in sorted_ranges[1:]:
+                last_start, last_end = merged[-1]
+                
+                if current_start <= last_end:
+                    merged[-1] = [last_start, max(last_end, current_end)]
+                else:
+                    # Disjoint range (reassigned variable)
+                    merged.append([current_start, current_end])
+                    
+            # 3. Calculate distances and the absolute max distance
+            final_ranges = []
+            max_dist = 0
+            
+            for start, end in merged:
+                dist = end - start
+                final_ranges.append({
+                    "interval": [start, end],
+                    "distance": dist
+                })
+                
+                if dist > max_dist:
+                    max_dist = dist
+                    
+            # 4. Save the enriched data structure back to the variable tracker
+            self.variables[var_name]["live_ranges"] = final_ranges
+            self.variables[var_name]["max_live_distance"] = max_dist
 
     def _collect_metrics(self) -> None:
-        """Sammelt alle Metriken aus dem CFG"""
-        try:
-            import traceback
-            self._count_variables()
-            self._count_definitions_and_usages()
-            self._count_copy_assignments()
-            self._calculate_halstead_metrics()
-            self._calculate_live_ranges()
-            self._calculate_scopes()
-        except Exception as ex:
-            traceback.print_exception(ex)
-
-    def _count_variables(self) -> None:
-        """Zählt die Anzahl der eindeutigen Variablen (nach name, ohne ssa_label)"""
+        total_operands =  0
+        total_operators = 0
         variables = set()
-        for instruction in self.cfg.instructions:
-            for expr in instruction.subexpressions():
-                if isinstance(expr, Variable):
-                    variables.add(expr)
+        constants = set()
+        distinct_operators = set()
+        var_to_block = defaultdict(set) 
 
-        unique_names = {var.name for var in variables}
-        self.num_variables = len(unique_names)
 
-    def _count_definitions_and_usages(self) -> None:
-        """Zählt Definitionen und Nutzungen pro Variable (nach name)"""
-        definitions_per_var: Dict[str, int] = defaultdict(int)
-        usages_per_var: Dict[str, int] = defaultdict(int)
+        for block in self.cfg:
+            for instruction in block: 
+                for expr in instruction.subexpressions():
+                    if isinstance(expr, Variable):
+                        total_operands += 1
+                        variables.add(expr.name)
+                        var_to_block[expr.name].add(block.address)
 
-        for instruction in self.cfg.instructions:
-            if isinstance(instruction, Assignment):
-                for var in instruction.definitions:
-                    definitions_per_var[var.name] += 1
-                for var in _get_variables_from_expr(instruction.value):
-                    usages_per_var[var.name] += 1
+                    elif isinstance(expr, Constant):
+                        total_operands += 1
+                        constants.add((str(expr.value), str(expr.type)))
 
-        self.num_definitions = sum(definitions_per_var.values())
-        self.num_usages = sum(usages_per_var.values())
+                    elif isinstance(expr, (BinaryOperation, UnaryOperation, Call, TernaryExpression)):
+                        total_operators += 1
+                        distinct_operators.add(expr.operation)
 
-        for name, count in definitions_per_var.items():
-            self.variables[name]["definitions"] = count
-        for name, count in usages_per_var.items():
-            self.variables[name]["usages"] = count
 
-    def _count_copy_assignments(self) -> None:
-        """Zählt Copy Assignments (a = b wo beide Seiten variablen sind)"""
-        for instruction in self.cfg.instructions:
-            if isinstance(instruction, Assignment):
-                if isinstance(instruction.value, Variable) and isinstance(instruction.destination, Variable):
-                    self.num_copy_assignments += 1
+                if isinstance(instruction, Assignment) and isinstance(instruction.destination, Variable):
+                    # count definitions
+                    self.variables[instruction.destination.name]["definitions"] += 1
 
-    def _calculate_halstead_metrics(self) -> None:
-        """Berechnet Halstead-Metriken für alle Anweisungen im CFG"""
-        for instruction in self.cfg.instructions:
-            if isinstance(instruction, Assignment):
-                # Destination ist ein Operand
-                for var in instruction.definitions:
-                    if isinstance(var, Variable):
-                        self.distinct_operands.add(var.name)
-                    self.total_operands += 1
+                    # count copy assignments
+                    if isinstance(instruction.value, Variable):
+                        self.num_copy_assignments += 1
 
-                # Value kann Operatoren und Operanden enthalten
-                self._extract_operators(instruction.value)
-                self._extract_operands(instruction.value)
-        
+                # count usages
+                for var in instruction.requirements:
+                    self.variables[var.name]["usages"] += 1
+
+
+        # Setting variable count
+        self.num_variables = len(variables)
+
         # Berechne Halstead Metriken
-        import math
-        
-        n1 = len(self.distinct_operators)
-        n2 = len(self.distinct_operands)
-        N1 = self.total_operators
-        N2 = self.total_operands
+        n1 = len(distinct_operators)
+        n2 = len(variables) + len(constants)
+        N1 = total_operators
+        N2 = total_operands
         
         # Vocabulary = n1 + n2
         vocabulary = n1 + n2
@@ -253,10 +315,6 @@ class EvalHelper:
         # Bugs = Volume / 3000
         halstead_bugs = halstead_volume / 3000
         
-        self.halstead_distinct_operators = n1
-        self.halstead_distinct_operands = n2
-        self.halstead_total_operators = N1
-        self.halstead_total_operands = N2
         self.halstead_vocabulary = vocabulary
         self.halstead_length = length
         self.halstead_volume = round(halstead_volume, 2)
@@ -264,88 +322,19 @@ class EvalHelper:
         self.halstead_effort = round(halstead_effort, 2)
         self.halstead_bugs = round(halstead_bugs, 6)
 
-    def _calculate_live_ranges(self) -> None:
-        """
-        Berechnet Live-Ranges pro Variable mittels Dataflow-Analyse.
-        Die Distanz ist die Anzahl der Instruktionen zwischen Definition und letzter lokaler Nutzung.
-        Überlebt eine Variable den Basic Block (LiveOut), wird das Ende des Blocks als letzte Nutzung gewertet.
-        """
-        # 1. Führe die Dataflow-Analyse aus (benötigt die LivenessDataflowAnalysis Klasse)
-        dataflow = LivenessDataflowAnalysis(self.cfg)
-        
-        # 2. Erstelle ein Mapping von Instruktion zu globalem Index für die Distanzmessung
-        global_instr_idx = 0
-        instr_mapping = {} 
-        
-        for block in self.cfg:
-            for instr in block.instructions:
-                instr_mapping[instr] = global_instr_idx
-                global_instr_idx += 1
+        # calculating scopes
+        for var_name, blocks in var_to_block.items():
+            self.variables[var_name]["scopes"] = len(blocks)
 
-        # 3. Rückwärts-Analyse pro Basic Block zur Berechnung der exakten Distanzen
-        for block in self.cfg:
-            # Variablen, die diesen Block überleben (LiveOut)
-            currently_live = set(dataflow.live_out[block])
-            last_seen_use_index = {} 
-            
-            # Wenn eine Variable den Block überlebt, setzen wir als ihre "letzte Nutzung" 
-            # den Index der allerletzten Instruktion in diesem Block.
-            if block.instructions:
-                block_end_index = instr_mapping[block.instructions[-1]]
-                for var_name in currently_live:
-                    last_seen_use_index[var_name] = block_end_index
-            
-            # Gehe den Block rückwärts durch
-            for instr in reversed(block.instructions):
-                idx = instr_mapping[instr]
-                
-                # Prüfe Definitionen (Hier endet die Live-Range beim Rückwärtsgehen)
-                if isinstance(instr, Assignment):
-                    for var in instr.definitions:
-                        if var.name in last_seen_use_index:
-                            # Distanz berechnen
-                            distance = last_seen_use_index[var.name] - idx
-                            self.variables[var.name]["live_ranges"].append(distance)
-                            
-                            # Variable "stirbt" hier (beim Rückwärtsgehen), also aus dem Tracking entfernen
-                            del last_seen_use_index[var.name]
-                            currently_live.discard(var.name)
-                        else:
-                            # Variable wurde definiert, aber danach NIE genutzt (Dead Code)
-                            self.variables[var.name]["live_ranges"].append(0)
-
-                # Prüfe Nutzungen (Hier beginnt die Live-Range beim Rückwärtsgehen)
-                for var in  instr.requirements:
-                    if var.name not in last_seen_use_index:
-                        last_seen_use_index[var.name] = idx
-                        currently_live.add(var.name)
-
-    def _calculate_scopes(self) -> None:
-        """Zählt die Anzahl der Scopes (Basic Blocks) pro Variable"""
-        for var in self._get_all_variables():
-            seen_blocks = set()
-
-            for bb in self.cfg:
-                for instr in bb.instructions:
-                    if var in instr.definitions or var in instr.requirements:
-                        block_scope = f"BB_{bb.address}"
-                        if block_scope not in seen_blocks:
-                            self.variables[var.name]["scopes"].add(block_scope)
-                            seen_blocks.add(block_scope)
-
+        # calculating live ranges 
+        self._calculate_live_ranges()
 
     def to_dict(self) -> Dict:
         """Gibt alle Metriken als Dict zurück"""
         return {
             "num_variables": self.num_variables,
-            "num_definitions": self.num_definitions,
-            "num_usages": self.num_usages,
             "num_copy_assignments": self.num_copy_assignments,
             # Halstead Metriken
-            "halstead_distinct_operators": self.halstead_distinct_operators,
-            "halstead_distinct_operands": self.halstead_distinct_operands,
-            "halstead_total_operators": self.halstead_total_operators,
-            "halstead_total_operands": self.halstead_total_operands,
             "halstead_vocabulary": self.halstead_vocabulary,
             "halstead_length": self.halstead_length,
             "halstead_volume": self.halstead_volume,
@@ -356,8 +345,9 @@ class EvalHelper:
                 k: {
                     "definitions": v["definitions"],
                     "usages": v["usages"],
+                    "scopes": v["scopes"],
                     "live_ranges": v["live_ranges"],
-                    "scopes": list(v["scopes"]),
+                    "max_live_distance": v["max_live_distance"],
                 }
                 for k, v in self.variables.items()
             },

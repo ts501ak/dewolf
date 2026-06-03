@@ -19,7 +19,7 @@ from decompiler.pipeline.preprocessing import (
     SwitchVariableDetection,
 )
 from decompiler.pipeline.ssa.outofssatranslation import OutOfSsaTranslation
-from decompiler.pipeline.ssa.eval_export import SsaEvalExport
+from decompiler.pipeline.ssa.eval_export import SSAEvalExport
 from decompiler.task import DecompilerTask
 from decompiler.util.decoration import DecoratedAST, DecoratedCFG
 
@@ -42,7 +42,7 @@ PREPROCESSING_STAGES = [
     PhiFunctionFixer,
 ]
 
-POSTPROCESSING_STAGES = [OutOfSsaTranslation, SsaEvalExport, PatternIndependentRestructuring]
+POSTPROCESSING_STAGES = [OutOfSsaTranslation, SSAEvalExport, PatternIndependentRestructuring]
 
 
 class DecompilerPipeline:
