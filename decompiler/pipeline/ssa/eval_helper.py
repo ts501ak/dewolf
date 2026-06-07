@@ -6,7 +6,7 @@ from typing import Dict, Set
 from decompiler.structures.graphs.cfg import BasicBlock, ControlFlowGraph
 from decompiler.structures.pseudo.expressions import Constant, Variable
 from decompiler.structures.pseudo.instructions import Assignment, Branch, Return, Break, Continue
-from decompiler.structures.pseudo.operations import BinaryOperation, Call, TernaryExpression, UnaryOperation
+from decompiler.structures.pseudo.operations import Call, TernaryExpression, Operation
 
 from collections import defaultdict
 from typing import Dict, Set
@@ -255,7 +255,7 @@ class EvalHelper:
 
         for block in self.cfg:
             for instruction in block: 
-                if isinstance(instruction, (Branch, Return, Break, Continue)):
+                if isinstance(instruction, (Branch, Return, Break, Continue,Assignment)):
                     if isinstance(instruction, Branch):
                         total_operators += 1
                         distinct_operators.add("If")
@@ -268,6 +268,9 @@ class EvalHelper:
                     elif isinstance(instruction, Continue):
                         total_operators += 1
                         distinct_operators.add("Continue")
+                    elif isinstance(instruction, Assignment):
+                        total_operators += 1
+                        distinct_operators.add("=(Assignment)")
                 for expr in instruction.subexpressions():
                     if isinstance(expr, Variable):
                         total_operands += 1
@@ -278,9 +281,10 @@ class EvalHelper:
                         total_operands += 1
                         constants.add((str(expr.value), str(expr.type)))
 
-                    elif isinstance(expr, (BinaryOperation, UnaryOperation, Call, TernaryExpression)):
+                    elif isinstance(expr, Operation): #An Operation is for example a BinaryOperation, UnaryOperation, Call, TernaryExpression, etc. 
                         total_operators += 1
-                        distinct_operators.add(expr.operation)
+                        if expr.operation:
+                            distinct_operators.add(expr.operation)
 
 
                 if isinstance(instruction, Assignment) and isinstance(instruction.destination, Variable):
