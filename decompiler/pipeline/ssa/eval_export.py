@@ -18,7 +18,7 @@ class SSAEvalExport(PipelineStage):
     def run(self, task: DecompilerTask) -> None:
         """Export SSA evaluation metrics to JSON file specified by HEINZ_PETER env var."""
         try:
-            eval_helper = EvalHelper(task.graph)
+            eval_helper = EvalHelper(task)
             metrics_dict = eval_helper.to_dict()
             
             output_path = os.environ.get("HEINZ_PETER")
