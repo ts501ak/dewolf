@@ -409,7 +409,7 @@ class ConditionalVariableRenamer(VariableRenamer):
         self.correctedInterferencePairs = 0
         self.interference_graph = interference_graph
         self.task = task
-        self.helpvalue = pow(2, 40)
+        self.helpvalue = pow(2, 40) #We give this value to edges between variables which are connected in a relation, this makes it very unlikely that they get separated in different classes
         self._generate_renaming_map(task.graph, metric_helper)
 
     def _generate_renaming_map(self, cfg: ControlFlowGraph, metric_helper: MetricHelper):
@@ -509,6 +509,12 @@ class ConditionalVariableRenamer(VariableRenamer):
         for x in combinations(dependency_graph.nodes,2):
             if x[0][0].type != x[1][0].type:
                 interferingPairs.append((x[0],x[1]))
+            elif (x[0][0].is_aliased != x[1][0].is_aliased) or (x[0][0].is_aliased and x[1][0].is_aliased and (x[0][0].name != x[1][0].name)):
+                interferingPairs.append((x[0],x[1]))
+            elif isinstance(x[0][0], GlobalVariable) != isinstance(x[1][0], GlobalVariable):
+                interferingPairs.append((x[0],x[1]))
+            elif (isinstance(x[0][0],GlobalVariable) and  isinstance(x[1][0],GlobalVariable) and (x[0][0].name != x[1][0].name)):
+                interferingPairs.append((x[0],x[1]))
 
             if(x[0][0].type == None) or (x[1][0].type == None):
                 raise Exception("Encountered a None type variable in the SSA-Stage!")
@@ -535,7 +541,7 @@ class ConditionalVariableRenamer(VariableRenamer):
 
                         # edges = {(u, v) for u in part1 for v in dependency_graph.neighbors(u) if v in part2}
                         cuts.append(StCutStorage(pair[0], pair[1], part1, part2, weight))
-                        cuts.sort(key=attrgetter("weight"))
+                    cuts.sort(key=attrgetter("weight"))
                     del interferingPairs
                     for x in cuts:
                         x: ConditionalVariableRenamer.StCutStorage
@@ -587,7 +593,7 @@ class ConditionalVariableRenamer(VariableRenamer):
 
                     dia = self.getDiameterApproximation(dependency_graph.subgraph(zhk))
                     for x in interferingPairs:
-                        paths.extend(list(nx.all_simple_edge_paths(dependency_graph.subgraph(zhk), x[0], x[1], 0.075 * dia)))
+                        paths.extend(list(nx.all_simple_edge_paths(dependency_graph.subgraph(zhk), x[0], x[1], 0.08 * dia)))
                     if len(paths) == 0:
                         continue
                     pathsEncoded = []
@@ -694,15 +700,14 @@ class ConditionalVariableRenamer(VariableRenamer):
                             else:
                                 raise Exception("Something went wrong while solving the LP")
                 failCount = 0
-                ifPairs = self.getInterferingPairs(dependency_graph)
-                for pair in ifPairs:
+                for pair in self.getInterferingPairs(dependency_graph):
                     if has_path(dependency_graph, pair[0], pair[1]):
                         self.correctedInterferencePairs += 1
                         _, (part1, part2) = minimum_cut(dependency_graph, pair[0], pair[1], capacity="score")
                         failCount += 1
                         edges = [(u, v) for u in part1 for v in dependency_graph.neighbors(u) if v in part2]
                         dependency_graph.remove_edges_from(edges)
-
+                #print("FailCount:",failCount)
                 return dependency_graph
 
             case _:
@@ -753,7 +758,7 @@ class ConditionalVariableRenamer(VariableRenamer):
                         break
 
                 if new_name == None:
-                    raise Exception("Found no suitable name for connected component")
+                    new_name = f"var#{hash(frozenset(varclass))[0:5]}"
 
                 while new_name in assignedNames:
                     new_name = f"{new_name}__{count}"
@@ -761,4 +766,5 @@ class ConditionalVariableRenamer(VariableRenamer):
                 assignedNames.append(new_name)
 
                 for var in varclass:
-                    self.renaming_map[var] = Variable(new_name, var.type, None, False, var, var.tags)
+                    self.renaming_map[var] = Variable(new_name, var.type, None, var.is_aliased, var, var.tags)
+
