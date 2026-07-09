@@ -17,7 +17,7 @@ from decompiler.structures.graphs.cfg import BasicBlock
 from decompiler.structures.interferencegraph import InterferenceGraph
 from decompiler.structures.pseudo.instructions import Phi
 from decompiler.task import DecompilerTask
-from decompiler.pipeline.ssa.sreedhar_out_of_ssa import SreedharOutOfSsa
+from decompiler.pipeline.ssa.sreedhar_out_of_ssa import SreedharOutOfSSA, ConstantLifter
 
 
 class SSAOptions(Enum):
@@ -183,7 +183,8 @@ class OutOfSsaTranslation(PipelineStage):
         ConditionalOutOfSSA(self.task, self._phi_functions_of, 1, 0.5, 0.1, 3).perform()
 
     def _sreedhar_out_of_ssa(self) -> None:
-        SreedharOutOfSsa(self.task).perform()
+        ConstantLifter(self.task).perform()
+        SreedharOutOfSSA(self.task).perform()
 
     def _boissinot2008(self):
         Boissinot2008(self.task,self._phi_functions_of).perform()
