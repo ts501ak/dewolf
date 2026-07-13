@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import json
 import itertools
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -438,8 +440,18 @@ class SreedharOutOfSSA:
 
             yield instr
 
+
     def _variable_rename(self) -> None:
         renaming_map = self._phi_congruence_map.generate_renaming_map(self._function_arg_names, self._name_handler)
+
+        path = os.getenv("SSA_DICT_OUT")
+        if path:
+            if path != None and renaming_map != None:
+                names = {a.name:b.name for a,b in renaming_map.items()}
+                with open(path,mode="w") as f: #Note: this trncates the file, so the path has to be up to date, else the old data is lost!
+                    json.dump(names, f)
+            else:
+                raise Exception(f"Got incorrect parameters: Path = {path}, dict = {renaming_map}")
 
         for bb in self._cfg:
             has_branch = bool(bb.instructions) and isinstance(bb.instructions[-1], GenericBranch)
