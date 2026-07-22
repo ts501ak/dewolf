@@ -92,6 +92,8 @@ class ConstantLifter:
 class SreedharOutOfSSA:
     """Implements Sreedhar's Out-of-SSA algorithm to translate SSA form back to normal form."""
 
+    _PHI_COPY_NAME = "phi_copy"
+
     class PhiCongruenceClass(InsertionOrderedSet[Variable]):
         pass
 
@@ -139,30 +141,39 @@ class SreedharOutOfSSA:
             for k, v in self._element_to_class.items():
                 group = groups[id(v)]
                 group.vars.append(k)
-                group.is_aliased |= k.is_aliased
+                
+                if not group.name: 
+                    if isinstance(k, GlobalVariable):
+                        group.name, group.type = k.name, k.type
+                        group.initial_value = k.initial_value
+                        group.tags, group.is_constant = k.tags, k.is_constant
+                        group.is_aliased, group.is_global = k.is_aliased, True
 
-                if isinstance(k, GlobalVariable):
-                    group.name, group.type = k.name, k.type
-                    group.initial_value, group.is_global = k.initial_value, True
-                    group.tags, group.is_constant = k.tags, k.is_constant
-                elif not group.name and k.name in function_arg_names:
-                    group.name = k.name
+                    elif k.is_aliased:
+                        group.name, group.type = k.name, k.type
+                        group.is_aliased = k.is_aliased
 
+                    elif k.name in function_arg_names:
+                        group.name, group.type = k.name, k.type
+                        group.is_aliased = k.is_aliased
+                
             renaming_map: dict[Variable, Variable] = {}
             for group in groups.values():
                 group.name = group.name or group.vars[0].name
                 group.type = group.type or group.vars[0].type
-                base_name = group.name if group.is_global else name_handler.get_name(group.name)
+                base_name = group.name if group.is_global or group.is_aliased else name_handler.get_name(group.name)
                     
                 for v in group.vars:
                     if group.is_global:
                         new_var = GlobalVariable(
                             name=base_name, vartype=group.type, initial_value=group.initial_value, 
-                            is_aliased=group.is_aliased, ssa_name=v, is_constant=group.is_constant, tags=group.tags 
+                            is_aliased=group.is_aliased, ssa_name=v, is_constant=group.is_constant, tags=group.tags,
+                            origin=v.origin
                         )
                     else:
                         new_var = Variable(
-                            name=base_name, vartype=group.type, is_aliased=group.is_aliased, ssa_name=v, tags=v.tags
+                            name=base_name, vartype=group.type, is_aliased=group.is_aliased, ssa_name=v, tags=v.tags,
+                            origin=v.origin
                         )
                     renaming_map[v] = new_var
 
@@ -212,6 +223,7 @@ class SreedharOutOfSSA:
         self._init_interference_graph()
         self._eliminate_phi_resource_interference()
         self._copy_removal()
+        self._debug_check_phi_classes()
         self._variable_rename()
 
     def _initialize_liveness(self) -> None:
@@ -269,10 +281,8 @@ class SreedharOutOfSSA:
         global_vars = [v for v in all_vars if isinstance(v, GlobalVariable)]
         local_vars = [v for v in all_vars if not isinstance(v, GlobalVariable)]
 
-        lhs_of_assignments = {
-            i.destination for i in self._cfg.instructions 
-            if isinstance(i, Assignment) and isinstance(i.destination, Variable)
-        }
+        aliased_vars = [v for v in all_vars if v.is_aliased]
+        non_aliased_vars = [v for v in all_vars if not v.is_aliased]
 
         # Find latest SSA version of function arguments
         func_args: dict[str, Variable] = {}
@@ -282,18 +292,12 @@ class SreedharOutOfSSA:
                     func_args[var.name] = var
 
         edges = list(itertools.combinations(func_args.values(), 2))
-        edges.extend(itertools.product(func_args.values(), global_vars))
-        
-        non_lhs_globals = [gv for gv in global_vars if gv not in lhs_of_assignments]
-        edges.extend(itertools.product(non_lhs_globals, local_vars))
-        edges.extend((g1, g2) for g1, g2 in itertools.product(non_lhs_globals, global_vars) if g1 is not g2 and g1.name != g2.name)
 
-        aliased_vars = [v for v in all_vars if v.is_aliased]
-        non_aliased_vars = [v for v in all_vars if not v.is_aliased]
-        non_lhs_aliased = [a for a in aliased_vars if a not in lhs_of_assignments]
+        edges.extend(itertools.product(global_vars, local_vars))
+        edges.extend((g1, g2) for g1, g2 in itertools.product(global_vars, global_vars) if g1 is not g2 and g1.name != g2.name)
         
-        edges.extend(itertools.product(non_lhs_aliased, non_aliased_vars))
-        edges.extend((a1, a2) for a1, a2 in itertools.product(non_lhs_aliased, aliased_vars) if a1 is not a2 and a1.name != a2.name)
+        edges.extend(itertools.product(aliased_vars, non_aliased_vars))
+        edges.extend((a1, a2) for a1, a2 in itertools.product(aliased_vars, aliased_vars) if a1 is not a2 and a1.name != a2.name)
 
         self._interference_graph.add_edges_from(edges)
 
@@ -333,8 +337,8 @@ class SreedharOutOfSSA:
 
     def _create_copy_var(self, original: Variable) -> Variable:
         return Variable(
-            name="phi_copy", vartype=original.type,
-            ssa_label=self._name_handler.get_ssa_label("phi_copy"), is_aliased=False
+            name=self._PHI_COPY_NAME, vartype=original.type,
+            ssa_label=self._name_handler.get_ssa_label(self._PHI_COPY_NAME), is_aliased=False
         )
 
     def _insert_dest_copy(self, phi: Phi, x: Variable, x_new: Variable) -> None:
@@ -446,6 +450,48 @@ class SreedharOutOfSSA:
                     if self._can_remove_copy(assign.destination, assign.value, lpc, rpc):
                         self._phi_congruence_map.merge_classes([assign.destination, assign.value])
 
+    def _debug_check_phi_classes(self) -> None:
+        if not self._debug_check:
+            return
+
+        classes_by_id: dict[int, list[Variable]] = defaultdict(list)
+        for k, v in self._phi_congruence_map._element_to_class.items():
+            classes_by_id[id(v)].append(k)
+
+        for phi_class in classes_by_id.values():
+            # Filter out phi_copy placeholders for strict identity checks
+            real_vars = [v for v in phi_class if v.name != self._PHI_COPY_NAME]
+            if not real_vars:
+                continue
+
+            # 1. Validate Globals
+            globals_in_class = [v for v in real_vars if isinstance(v, GlobalVariable)]
+            if globals_in_class:
+                first_global = globals_in_class[0]
+                for v in real_vars:
+                    if not isinstance(v, GlobalVariable):
+                        raise AssertionError(
+                            f"Global variable mixed with non-global variable in congruence class: {phi_class}"
+                        )
+                    if v.name != first_global.name:
+                        raise AssertionError(
+                            f"Different global names in same congruence class: {phi_class}"
+                        )
+
+            # 2. Validate Aliased Variables
+            aliased_in_class = [v for v in real_vars if v.is_aliased]
+            if aliased_in_class:
+                first_aliased = aliased_in_class[0]
+                for v in real_vars:
+                    if not v.is_aliased:
+                        raise AssertionError(
+                            f"Aliased variable mixed with non-aliased variable in congruence class: {phi_class}"
+                        )
+                    if v.name != first_aliased.name:
+                        raise AssertionError(
+                            f"Different aliased names in same congruence class: {phi_class}"
+                        )
+
     def _process_and_rename(self, instrs: Iterable[Instruction], renaming_map: dict[Variable, Variable]) -> Generator[Instruction, None, None]:
         """Applies renaming in-place and yields instructions, skipping self-assignments and Phis/Relations."""
         for instr in instrs:
@@ -462,7 +508,6 @@ class SreedharOutOfSSA:
                     continue
 
             yield instr
-
 
     def _variable_rename(self) -> None:
         renaming_map = self._phi_congruence_map.generate_renaming_map(self._function_arg_names, self._name_handler)
