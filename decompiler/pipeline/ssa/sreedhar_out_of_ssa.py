@@ -97,6 +97,8 @@ class SreedharOutOfSSA:
     _KIND_LOCAL    = 1 << 1  # 2
     _KIND_WILD    = 1 << 0  # 1
 
+    _NAME_CHECK_MASK = _KIND_GLOBAL | _KIND_ALIASED
+
     _ALLOWED_MERGES = {
         _KIND_GLOBAL:   _KIND_GLOBAL | _KIND_WILD,
         _KIND_ALIASED:  _KIND_ALIASED | _KIND_WILD,
@@ -305,11 +307,11 @@ class SreedharOutOfSSA:
            if len(name_group) < 2:
                continue
 
-           vars_iter = iter(name_group)
-           anchor = next(vars_iter)
+           sorted_group = sorted(name_group, key=lambda v: v.ssa_label)
+           anchor = sorted_group[0]
            merged_class = self._phi_congruence_map.get_class(anchor)
 
-           for var in vars_iter:
+           for var in sorted_group[1:]:
                var_class = self._phi_congruence_map.get_class(var)
                if var_class is merged_class:
                     continue
@@ -353,7 +355,7 @@ class SreedharOutOfSSA:
         if not (self._ALLOWED_MERGES[a.kind] & b.kind):
             return False
             
-        if a.kind == b.kind == self._KIND_ALIASED:
+        if a.kind == b.kind and (a.kind & self._NAME_CHECK_MASK):
             return a.repr.name == b.repr.name #type: ignore
             
         return True
